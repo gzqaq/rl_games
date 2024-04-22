@@ -61,7 +61,7 @@ def safe_filesystem_op(func, *args, **kwargs):
         try:
             return func(*args, **kwargs)
         except Exception as exc:
-            print(f'Exception {exc} when trying to execute {func} with args:{args} and kwargs:{kwargs}...')
+            # print(f'Exception {exc} when trying to execute {func} with args:{args} and kwargs:{kwargs}...')
             wait_sec = 2 ** attempt
             print(f'Waiting {wait_sec} before trying again...')
             time.sleep(wait_sec)
@@ -76,6 +76,8 @@ def safe_load(filename):
 
 def save_checkpoint(filename, state):
     print("=> saving checkpoint '{}'".format(filename + '.pth'))
+    # print(state, filename)
+    # from ipdb import set_trace; set_trace()
     safe_save(state, filename + '.pth')
 
 def load_checkpoint(filename):

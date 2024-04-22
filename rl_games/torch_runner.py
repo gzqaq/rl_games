@@ -4,7 +4,9 @@ import numpy as np
 import random
 from copy import deepcopy
 import torch
+#import yaml
 
+#from rl_games import envs
 from rl_games.common import object_factory
 from rl_games.common import tr_helpers
 
@@ -13,7 +15,6 @@ from rl_games.algos_torch import a2c_discrete
 from rl_games.algos_torch import players
 from rl_games.common.algo_observer import DefaultAlgoObserver
 from rl_games.algos_torch import sac_agent
-
 
 def _restore(agent, args):
     if 'checkpoint' in args and args['checkpoint'] is not None and args['checkpoint'] !='':
@@ -31,24 +32,7 @@ def _override_sigma(agent, args):
 
 
 class Runner:
-    """Runs training/inference (playing) procedures as per a given configuration.
-
-    The Runner class provides a high-level API for instantiating agents for either training or playing
-    with an RL algorithm. It further logs training metrics.
-
-    """
-
     def __init__(self, algo_observer=None):
-        """Initialise the runner instance with algorithms and observers.
-
-        Initialises runners and players for all algorithms available in the library using `rl_games.common.object_factory.ObjectFactory`
-
-        Args:
-            algo_observer (:obj:`rl_games.common.algo_observer.AlgoObserver`, optional): Algorithm observer that logs training metrics.
-                Defaults to `rl_games.common.algo_observer.DefaultAlgoObserver`
-
-        """
-
         self.algo_factory = object_factory.ObjectFactory()
         self.algo_factory.register_builder('a2c_continuous', lambda **kwargs : a2c_continuous.A2CAgent(**kwargs))
         self.algo_factory.register_builder('a2c_discrete', lambda **kwargs : a2c_discrete.DiscreteA2CAgent(**kwargs)) 
@@ -71,34 +55,12 @@ class Runner:
         pass
 
     def load_config(self, params):
-        """Loads passed config params.
-
-        Args:
-            params (:obj:`dict`): Parameters passed in as a dict obtained from a yaml file or some other config format.
-
-        """
-
         self.seed = params.get('seed', None)
         if self.seed is None:
             self.seed = int(time.time())
 
-        self.local_rank = 0
-        self.global_rank = 0
-        self.world_size = 1
-
         if params["config"].get('multi_gpu', False):
-            # local rank of the GPU in a node
-            self.local_rank = int(os.getenv("LOCAL_RANK", "0"))
-            # global rank of the GPU
-            self.global_rank = int(os.getenv("RANK", "0"))
-            # total number of GPUs across all nodes
-            self.world_size = int(os.getenv("WORLD_SIZE", "1"))
-
-            # set different random seed for each GPU
-            self.seed += self.global_rank
-
-            print(f"global_rank = {self.global_rank} local_rank = {self.local_rank} world_size = {self.world_size}")
-
+            self.seed += int(os.getenv("LOCAL_RANK", "0"))
         print(f"self.seed = {self.seed}")
 
         self.algo_params = params['algo']
@@ -117,7 +79,7 @@ class Runner:
                     params['config']['env_config']['seed'] = self.seed
                 else:
                     if params["config"].get('multi_gpu', False):
-                        params['config']['env_config']['seed'] += self
+                        params['config']['env_config']['seed'] += int(os.getenv("LOCAL_RANK", "0"))
 
         config = params['config']
         config['reward_shaper'] = tr_helpers.DefaultRewardsShaper(**config['reward_shaper'])
@@ -132,25 +94,13 @@ class Runner:
         self.load_config(params=self.default_config)
 
     def run_train(self, args):
-        """Run the training procedure from the algorithm passed in.
-
-        Args:
-            args (:obj:`dict`): Train specific args passed in as a dict obtained from a yaml file or some other config format.
-
-        """
         print('Started to train')
-        agent = self.algo_factory.create(self.algo_name, base_name='run', params=self.params)
-        _restore(agent, args)
-        _override_sigma(agent, args)
-        agent.train()
+        self.agent = self.algo_factory.create(self.algo_name, base_name='run', params=self.params)
+        _restore(self.agent, args)
+        _override_sigma(self.agent, args)
+        self.agent.train()
 
     def run_play(self, args):
-        """Run the inference procedure from the algorithm passed in.
-
-        Args:
-            args (:obj:`dict`): Playing specific args passed in as a dict obtained from a yaml file or some other config format.
-
-        """
         print('Started to play')
         player = self.create_player()
         _restore(player, args)
@@ -159,20 +109,23 @@ class Runner:
 
     def create_player(self):
         return self.player_factory.create(self.algo_name, params=self.params)
+    
+    def restore_player(self, player, args):
+        _restore(player, args)
+        _override_sigma(player, args)
 
     def reset(self):
         pass
 
     def run(self, args):
-        """Run either train/play depending on the args.
+        load_path = None
 
-        Args:
-            args (:obj:`dict`):  Args passed in as a dict obtained from a yaml file or some other config format.
-
-        """        
         if args['train']:
             self.run_train(args)
+
         elif args['play']:
             self.run_play(args)
         else:
             self.run_train(args)
+        # data = load_tensorboard_logs(self.agent.writer.logdir)
+        # return data 

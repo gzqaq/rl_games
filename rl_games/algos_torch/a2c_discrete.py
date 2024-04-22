@@ -13,19 +13,8 @@ import numpy as np
 
 
 class DiscreteA2CAgent(a2c_common.DiscreteA2CBase):
-    """Discrete PPO Agent
 
-    The DiscreteA2CAgent class inerits from the discrete asymmetric actor-critic class and makes modifications for PPO.
-
-    """
     def __init__(self, base_name, params):
-        """Initialise the algorithm with passed params
-
-        Args:
-            base_name (:obj:`str`): Name passed on to the observer and used for checkpoints etc.
-            params (:obj `dict`): Algorithm parameters
-
-        """
         a2c_common.DiscreteA2CBase.__init__(self, base_name, params)
         obs_shape = self.obs_shape
         
@@ -54,7 +43,7 @@ class DiscreteA2CAgent(a2c_common.DiscreteA2CBase):
                 'horizon_length' : self.horizon_length,
                 'num_actors' : self.num_actors, 
                 'num_actions' : self.actions_num, 
-                'seq_length' : self.seq_length,
+                'seq_len' : self.seq_len,
                 'normalize_value' : self.normalize_value,
                 'network' : self.central_value_config['network'],
                 'config' : self.central_value_config, 
@@ -66,7 +55,7 @@ class DiscreteA2CAgent(a2c_common.DiscreteA2CBase):
             self.central_value_net = central_value.CentralValueTrain(**cv_config).to(self.ppo_device)
 
         self.use_experimental_cv = self.config.get('use_experimental_cv', False)        
-        self.dataset = datasets.PPODataset(self.batch_size, self.minibatch_size, self.is_discrete, self.is_rnn, self.ppo_device, self.seq_length)
+        self.dataset = datasets.PPODataset(self.batch_size, self.minibatch_size, self.is_discrete, self.is_rnn, self.ppo_device, self.seq_len)
 
         if self.normalize_value:
             self.value_mean_std = self.central_value_net.model.value_mean_std if self.has_central_value else self.model.value_mean_std
@@ -81,9 +70,9 @@ class DiscreteA2CAgent(a2c_common.DiscreteA2CBase):
         state = self.get_full_state_weights()
         torch_ext.save_checkpoint(fn, state)
 
-    def restore(self, fn, set_epoch=True):
+    def restore(self, fn):
         checkpoint = torch_ext.load_checkpoint(fn)
-        self.set_full_state_weights(checkpoint, set_epoch=set_epoch)
+        self.set_full_state_weights(checkpoint)
 
     def get_masked_action_values(self, obs, action_masks):
         processed_obs = self._preproc_obs(obs['obs'])
@@ -106,6 +95,8 @@ class DiscreteA2CAgent(a2c_common.DiscreteA2CBase):
                 value = self.get_central_value(input_dict)
                 res_dict['values'] = value
 
+        if self.is_multi_discrete:
+            action_masks = torch.cat(action_masks, dim=-1)
         res_dict['action_masks'] = action_masks
         return res_dict
 
@@ -119,14 +110,6 @@ class DiscreteA2CAgent(a2c_common.DiscreteA2CBase):
         return self.train_result
 
     def calc_gradients(self, input_dict):
-        """Compute gradients needed to step the networks of the algorithm.
-
-        Core algo logic is defined here
-
-        Args:
-            input_dict (:obj:`dict`): Algo inputs as a dict.
-
-        """
         value_preds_batch = input_dict['old_values']
         old_action_log_probs_batch = input_dict['old_logp_actions']
         advantage = input_dict['advantages']
@@ -144,12 +127,11 @@ class DiscreteA2CAgent(a2c_common.DiscreteA2CBase):
         }
         if self.use_action_masks:
             batch_dict['action_masks'] = input_dict['action_masks']
-
         rnn_masks = None
         if self.is_rnn:
             rnn_masks = input_dict['rnn_masks']
             batch_dict['rnn_states'] = input_dict['rnn_states']
-            batch_dict['seq_length'] = self.seq_length
+            batch_dict['seq_length'] = self.seq_len
             batch_dict['bptt_len'] = self.bptt_len
             if self.zero_rnn_on_done:
                 batch_dict['dones'] = input_dict['dones']
